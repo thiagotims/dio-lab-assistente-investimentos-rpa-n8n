@@ -1,0 +1,174 @@
+{
+  "name": "Investimento personalizado",
+  "nodes": [
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{$json}}",
+        "options": {
+          "responseCode": 200
+        }
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        848,
+        -48
+      ],
+      "id": "84a01b41-df38-4155-b952-7a3a80aef4af",
+      "name": "Respond to Webhook"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Saída do Merge: um item com body.clientes e investimentos\nconst dados = $input.first().json;\nconst clientes = dados.body?.clientes ?? [];\nconst investimentos = dados.investimentos ?? [];\n\n// \"R$ 12.500,00\" -> 12500\nconst paraNumero = (valor) =>\n  Number(String(valor).replace(/[^\\d,]/g, '').replace(',', '.')) || 0;\n\n// 1000 -> \"R$ 1.000,00\"\nconst formatarBRL = (n) => {\n  const [inteiro, decimal] = Number(n).toFixed(2).split('.');\n  return 'R$ ' + inteiro.replace(/\\B(?=(\\d{3})+(?!\\d))/g, '.') + ',' + decimal;\n};\n\n// \"12.5%\" -> \"12,5%\"\nconst formatarRentabilidade = (r) => String(r).replace('.', ',');\n\nreturn clientes.map((cliente) => {\n  const saldo = paraNumero(cliente.saldo);\n\n  // Produtos do mesmo perfil do cliente\n  const opcoes = investimentos.filter(\n    (inv) => inv.perfil.toLowerCase() === cliente.perfil.toLowerCase()\n  );\n\n  // Produtos que o saldo permite, do maior mínimo para o menor\n  const acessiveis = opcoes\n    .filter((inv) => inv.minimo <= saldo)\n    .sort((a, b) => b.minimo - a.minimo);\n\n  let mensagem;\n  let produto = null;\n\n  if (acessiveis.length > 0) {\n    produto = acessiveis[0];\n    mensagem =\n      `Olá ${cliente.nome}! Pelo seu perfil (${cliente.perfil}), uma boa opção é ` +\n      `${produto.produto} (mínimo ${formatarBRL(produto.minimo)}). ` +\n      `Com seu saldo atual (${formatarBRL(saldo)}), você já consegue investir. ` +\n      `Rentabilidade: ${formatarRentabilidade(produto.rentabilidade)}`;\n  } else if (opcoes.length > 0) {\n    // O saldo não cobre nenhum produto: sugere o de menor mínimo\n    produto = [...opcoes].sort((a, b) => a.minimo - b.minimo)[0];\n    const falta = produto.minimo - saldo;\n    mensagem =\n      `Olá ${cliente.nome}! Pelo seu perfil (${cliente.perfil}), uma boa opção é ` +\n      `${produto.produto} (mínimo ${formatarBRL(produto.minimo)}). ` +\n      `Com seu saldo atual (${formatarBRL(saldo)}), faltam ${formatarBRL(falta)} para investir. ` +\n      `Rentabilidade: ${formatarRentabilidade(produto.rentabilidade)}`;\n  } else {\n    mensagem = `Olá ${cliente.nome}! No momento não temos opções para o perfil ${cliente.perfil}.`;\n  }\n\n  return {\n    json: {\n      nome: cliente.nome,\n      email: cliente.email,\n      perfil: cliente.perfil,\n      saldo: cliente.saldo,\n      produto: produto?.produto ?? null,\n      mensagem,\n    },\n  };\n});"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        608,
+        -48
+      ],
+      "id": "dc3ab50d-c059-475b-81a4-5557fa401ef5",
+      "name": "Gera MSGs"
+    },
+    {
+      "parameters": {
+        "mode": "combine",
+        "combineBy": "combineByPosition",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        464,
+        -272
+      ],
+      "id": "7089ba1e-efd1-4a7f-b2d9-79b91f65905b",
+      "name": "Combina perfil e tipo de investimento"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Pega o CSV como texto vindo do HTTP Request\nconst csvRaw = $json.data ?? $json.body ?? $json;\nconst text = (typeof csvRaw === \"string\") ? csvRaw : JSON.stringify(csvRaw);\n\nconst lines = text.split(/\\r?\\n/).map(l => l.trim()).filter(Boolean);\nconst headers = lines[0].split(\",\").map(h => h.trim());\n\nconst investimentos = lines.slice(1).map(line => {\n  const cols = line.split(\",\").map(c => c.trim());\n  const obj = {};\n  headers.forEach((h, i) => obj[h] = cols[i] ?? \"\");\n\n  // normaliza mínimo para número\n  obj.minimo = Number(String(obj.minimo).replace(/[^\\d]/g, \"\")) || 0;\n\n  return obj;\n});\n\nreturn [{ json: { investimentos } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        240,
+        0
+      ],
+      "id": "75472839-ddba-43fe-9088-d2e4c816c53c",
+      "name": "Organiza informacoes para legibilidade"
+    },
+    {
+      "parameters": {
+        "url": "https://digitalinnovationone.github.io/dio-lab-assistente-investimentos-rpa-n8n/data.csv",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        -32,
+        0
+      ],
+      "id": "cb52ebd4-363c-43fe-a3fa-1fc278c451e5",
+      "name": "Extrai dados de CSV"
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "Clientes",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.2,
+      "position": [
+        -272,
+        0
+      ],
+      "id": "0f07d6eb-8acc-406d-a7ea-7a2f2976bb4d",
+      "name": "Traz dados de clientes da Web",
+      "webhookId": "0ab7897e-20f7-4b3f-8cc0-e8a3a390cf74"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Respond to Webhook": {
+      "main": [
+        []
+      ]
+    },
+    "Gera MSGs": {
+      "main": [
+        [
+          {
+            "node": "Respond to Webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Combina perfil e tipo de investimento": {
+      "main": [
+        [
+          {
+            "node": "Gera MSGs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Organiza informacoes para legibilidade": {
+      "main": [
+        [
+          {
+            "node": "Combina perfil e tipo de investimento",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Extrai dados de CSV": {
+      "main": [
+        [
+          {
+            "node": "Organiza informacoes para legibilidade",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Traz dados de clientes da Web": {
+      "main": [
+        [
+          {
+            "node": "Extrai dados de CSV",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Combina perfil e tipo de investimento",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "versionId": "c0bfc547-8644-4780-a62b-310ece82e313",
+  "meta": {
+    "instanceId": "31203c5da47fb601ee577121830daf033cfce0e51882fdb7db9af021f9e7e42c"
+  },
+  "nodeGroups": [],
+  "id": "EmISIFlTOIQOun6M",
+  "tags": []
+}
